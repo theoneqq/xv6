@@ -82,18 +82,18 @@ sys_pgaccess(void)
   uint64 mask_addr;
   argaddr(2, &mask_addr);
 
-  unsigned int mask;
+  unsigned int mask = 0;
   uint64 start = PGROUNDUP(addr);
-  uint64 end = start + page_num * PGSIZE;
-
   struct proc *p = myproc();
   pagetable_t pagetable = p->pagetable;
-  for(int idx = 0; i < page_num; ++i) {
-  	pte_t *pte = walk(pa, start + i * PGSIZE, 0);
+  for(int idx = 0; idx < page_num; ++idx) {
+  	pte_t *pte = walk(pagetable, start + idx * PGSIZE, 0);
 	if ((*pte & PTE_V) && (*pte & PTE_A)) {
-		mask |= (1 << idx);	
+		mask |= (1 << (idx + 1));	
 	}
   }
+
+  copyout(pagetable, mask_addr, (char *)&mask, sizeof(unsigned int) / sizeof(char));
 
   return 0;
 }
