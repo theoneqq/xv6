@@ -14,6 +14,7 @@ void freerange(void *pa_start, void *pa_end);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+#define MAX_PAGE_NUM ((int) ((PGROUNDDOWN(PHYSTOP) - PGROUNDUP(KERNBASE)) / PGSIZE))
 struct run {
   struct run *next;
 };
@@ -21,13 +22,41 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  int ref_counts[MAX_PAGE_NUM];
 } kmem;
+
+
+
+int get_page_num(void *pa) {
+	uint64 start = PGROUNDUP(KERNBASE);
+	return (int) (((uint64) (pa) - start) / PGSIZE);
+}
+
+int incr_ref_count(void *pa, int count) {
+	int page_num = get_page_num(pa);
+	acquire(&kmem.lock);
+	kmem.ref_counts[page_num] += count;
+	int now_count = kmem.ref_counts[page_num];
+	//printf("p: %p, page num: %d\n", pa, page_num);
+	release(&kmem.lock);
+	return now_count;
+}
+
+int get_ref_count(void *pa) {
+	int page_num = get_page_num(pa);
+	int now_count = 0;
+	acquire(&kmem.lock);
+	now_count = kmem.ref_counts[page_num];
+	release(&kmem.lock);
+	return now_count;
+}
 
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
   freerange(end, (void*)PHYSTOP);
+  memset(kmem.ref_counts, 0, MAX_PAGE_NUM);
 }
 
 void
@@ -35,8 +64,9 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
     kfree(p);
+  }
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -52,14 +82,23 @@ kfree(void *pa)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
+  /*memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
 
   acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
-  release(&kmem.lock);
+  release(&kmem.lock);*/
+  int now_count = incr_ref_count(pa, -1);
+  if(now_count <= 0) {
+  	memset(pa, 1, PGSIZE);
+	r = (struct run *)pa;
+	acquire(&kmem.lock);
+	r->next = kmem.freelist;
+	kmem.freelist = r;
+	release(&kmem.lock);
+  }
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -72,8 +111,11 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r) {
     kmem.freelist = r->next;
+	int page_num = get_page_num((void *) r);
+	kmem.ref_counts[page_num] = 1;
+  }
   release(&kmem.lock);
 
   if(r)

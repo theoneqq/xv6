@@ -1,7 +1,7 @@
 #include "types.h"
 #include "riscv.h"
-#include "param.h"
 #include "defs.h"
+#include "param.h"
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
@@ -51,11 +51,13 @@ sys_sbrk(void)
 uint64
 sys_sleep(void)
 {
+	backtrace();
   int n;
   uint ticks0;
 
-
   argint(0, &n);
+  if(n < 0)
+    n = 0;
   acquire(&tickslock);
   ticks0 = ticks;
   while(ticks - ticks0 < n){
@@ -68,36 +70,6 @@ sys_sleep(void)
   release(&tickslock);
   return 0;
 }
-
-
-#ifdef LAB_PGTBL
-int
-sys_pgaccess(void)
-{
-  // lab pgtbl: your code here.
-  uint64 addr;
-  argaddr(0, &addr);
-  int page_num;
-  argint(1, &page_num);
-  uint64 mask_addr;
-  argaddr(2, &mask_addr);
-
-  unsigned int mask = 0;
-  uint64 start = PGROUNDUP(addr);
-  struct proc *p = myproc();
-  pagetable_t pagetable = p->pagetable;
-  for(int idx = 0; idx < page_num; ++idx) {
-  	pte_t *pte = walk(pagetable, start + idx * PGSIZE, 0);
-	if ((*pte & PTE_V) && (*pte & PTE_A)) {
-		mask |= (1 << (idx + 1));	
-	}
-  }
-
-  copyout(pagetable, mask_addr, (char *)&mask, sizeof(unsigned int) / sizeof(char));
-
-  return 0;
-}
-#endif
 
 uint64
 sys_kill(void)
