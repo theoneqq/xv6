@@ -64,6 +64,11 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
+	acquire(&kmem.lock);
+for(int page_num = 0; page_num < MAX_PAGE_NUM; ++page_num) {
+	kmem.ref_counts[page_num] = 0;
+}
+	release(&kmem.lock);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
     kfree(p);
   }
