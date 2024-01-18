@@ -235,11 +235,13 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
   for(a = oldsz; a < newsz; a += PGSIZE){
     mem = kalloc();
     if(mem == 0){
+		printf("mem is zero!\n");
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
     memset(mem, 0, PGSIZE);
     if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
+		printf("mapping failed!\n");
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
       return 0;
@@ -360,6 +362,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+	cowcopy(pagetable, va0);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
@@ -442,3 +445,45 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+int cowcopy(pagetable_t pagetable, uint64 va) {
+	if (va >= MAXVA)
+		return -1;
+	pte_t *pte = walk(pagetable, va, 0);
+	uint64 pa = PTE2PA(*pte);
+	if(pa == 0) {
+		return -1;
+	}
+	if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
+		return -1;
+	}
+	if((*pte & PTE_COW) == 0) {
+		return 0;
+	}
+
+	int old_flags = PTE_FLAGS(*pte);
+	int now_count = get_ref_count((void*)pa);
+	if (now_count > 1) {
+		char *mem = kalloc();
+		if (mem == 0) {
+			return -1;
+		}
+		memmove(mem, (char*) pa, PGSIZE);
+		uint64 va_round = PGROUNDDOWN(va);
+		uvmunmap(pagetable, va_round, 1, 1);
+		int new_flags = (old_flags & (~PTE_COW)) | PTE_W;
+		if(mappages(pagetable, va_round, PGSIZE, (uint64) mem, new_flags) != 0) {
+			kfree(mem);
+			return -1;
+		}
+		return 0;
+	} else if (now_count == 1) {
+		*pte = ((*pte) & (~PTE_COW)) | PTE_W;
+		return 0;
+	} else {
+		return -1;
+	}
+
+	return 0;
+}
+

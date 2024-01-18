@@ -29,35 +29,6 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
-int cowcopy(uint64 va) {
-	struct proc *p = myproc();
-	pte_t *pte = walk(p->pagetable, va, 0);
-	uint64 pa = PTE2PA(*pte);
-	if(pa == 0) {
-		return -1;
-	}
-	if((*pte & PTE_COW) == 0) {
-		return -1;
-	}
-
-	char *mem = kalloc();
-	if (mem == 0) {
-		return -1;
-	}
-
-	*pte = ((*pte) & (~PTE_COW)) | PTE_W;
-	if (get_ref_count((void *)pa) > 1) {
-		memmove(mem, (char*) pa, PGSIZE);
-		uint flags = PTE_FLAGS(*pte);
-		if(mappages(p->pagetable, va, PGSIZE, (uint64) mem, flags) != 0) {
-			kfree(mem);
-			return -1;
-		}
-		incr_ref_count((void *)pa, -1);
-	}
-	return 0;
-}
-
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -96,8 +67,8 @@ usertrap(void)
     syscall();
   } else if(r_scause() == 15) {
 	uint64 va = r_stval();
-	if(cowcopy(va) < 0) {
-		p->killed = 1;
+	if(cowcopy(p->pagetable, va) < 0) {
+		setkilled(p);
 	}
   } else if((which_dev = devintr()) != 0){
     // ok
